@@ -120,6 +120,7 @@
       animate();
       function animate() {
         requestAnimationFrame(animate);
+        stats.update();
         controls.update();
 
         time += Math.PI * 2.0 / 300;
