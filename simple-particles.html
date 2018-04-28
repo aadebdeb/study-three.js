@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Simple Particles</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <script src="./js/three.js"></script>
+  <script src="./js/stats.js"></script>
+  <script src="./js/controls/OrbitControls.js"></script>
+  <script>
+
+    function randomInSphere(radius) {
+      const phi = Math.random() * Math.PI;
+      const theta = Math.random() * Math.PI * 2.0;
+      return new THREE.Vector3(
+        radius * Math.sin(phi) * Math.cos(theta),
+        radius * Math.cos(phi),
+        radius * Math.sin(phi) * Math.sin(theta)
+      );
+    }
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 100000);
+    camera.position.set(400, 400, 400);
+    const controls = new THREE.OrbitControls(camera);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xeeeeee);
+
+    const light = new THREE.DirectionalLight(0xffffff);
+    light.position.set(1, 1, 1);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x666666));
+
+    const num = 200000;
+    const geometry = new THREE.Geometry();
+    geometry.velocities = [];
+    for (var i = 0; i < num; i++) {
+      geometry.vertices.push(randomInSphere(200));
+      geometry.velocities.push(randomInSphere(10));
+    }
+    const material = new THREE.PointsMaterial({
+      size: 2,
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.3
+    });
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
+
+    const target = new THREE.Mesh(
+      new THREE.IcosahedronBufferGeometry(15),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff
+      })
+    );
+    scene.add(target);
+
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const stats = new Stats();
+    document.body.appendChild(stats.dom);
+
+    const clock = new THREE.Clock();
+
+    let time = 0.0;
+    animate();
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+
+      const delta = Math.min(clock.getDelta(), 0.1);
+      time += delta;
+      target.position.x = 100 * Math.cos(time * 0.7);
+      target.position.z = 100 * Math.sin(time * 0.7);
+
+      target.rotation.x += 0.2 * Math.PI * delta;
+      target.rotation.y += 0.2 * Math.PI * delta;
+
+      const maxForce = 100.0;
+      for (var i = 0; i < num; i++) {
+        const force = new THREE.Vector3().subVectors(target.position, geometry.vertices[i]);
+        var d = force.length();
+        if (d > maxForce) {
+          force.normalize().multiplyScalar(maxForce);
+        }
+        geometry.velocities[i].add(force.multiplyScalar(delta));
+        geometry.vertices[i].add(geometry.velocities[i].clone().multiplyScalar(delta));
+      }
+      geometry.verticesNeedUpdate = true;
+
+      renderer.render(scene, camera);
+      stats.update();
+    }
+
+  </script>
+</body>
+</html>
