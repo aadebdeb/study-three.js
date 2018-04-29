@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Background Shader</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/controls/OrbitControls.js"></script>
+    <script src="./js/stats.js"></script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+
+      void main() {
+        gl_Position = vec4(position, 1.0);
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+      // based on the sample of  "The Book of Shaders"
+      // https://thebookofshaders.com/13/
+
+      precision highp float;
+
+      uniform vec2 resolution;
+      uniform float time;
+
+      float random(in vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      float noise(in vec2 st) {
+        vec2 i = floor(st);
+        vec2 f = fract(st);
+
+        float a = random(i);
+        float b = random(i + vec2(1.0, 0.0));
+        float c = random(i + vec2(0.0, 1.0));
+        float d = random(i + vec2(1.0, 1.0));
+
+        vec2 u = f * f * (3.0 - 2.0 * f);
+
+        return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+      }
+
+      #define NUM_OCTAVES 5
+
+      float fbm(in vec2 st) {
+        float v = 0.0;
+        float a = 0.5;
+        vec2 shift = vec2(100.0);
+        mat2 rot = mat2(cos(0.5), sin(0.5), -sin(0.5), cos(0.5));
+        for (int i = 0; i < NUM_OCTAVES; i++) {
+          v += a * noise(st);
+          st = rot * st * 2.0 + shift;
+          a *= 0.5;
+        }
+        return v;
+      }
+
+      void main() {
+        vec2 st = gl_FragCoord.xy / resolution.xy * 2.0;
+        vec3 color = vec3(0.0);
+        float time = 0.5 * time;
+
+        vec2 q = vec2(0.0);
+        q.x = fbm(st + time);
+        q.y = fbm(st + vec2(1.0));
+
+        vec2 r = vec2(0.0);
+        r.x = fbm(st + 1.0 * q + vec2(1.7, 9.2) + 0.15 * time);
+        r.y = fbm(st + 1.0 * q + vec2(8.3, 2.8) + 0.126 * time);
+
+        float f = fbm(st + r);
+
+        color = vec3(0.75);
+
+        gl_FragColor = vec4((f*f*f+.6*f*f+.5*f)*color,1.);
+      }
+    </script>
+    <script>
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
+      camera.position.z = 500;
+      const controls = new THREE.OrbitControls(camera);
+
+      const scene = new THREE.Scene();
+
+      const background = new THREE.Mesh(
+        new THREE.PlaneBufferGeometry(2.0, 2.0),
+        new THREE.RawShaderMaterial({
+          uniforms: {
+            resolution: {value: new THREE.Vector2(window.innerWidth, window.innerHeight)},
+            time: {value: 0.0}
+          },
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent,
+          depthTest: false,
+        })
+      );
+      background.renderOrder = -1;
+      scene.add(background);
+
+      function createMesh(color) {
+        return new THREE.Mesh(
+          new THREE.TetrahedronBufferGeometry(80.0),
+          new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: 0.3,
+            metalness: 0.7,
+          })
+        );
+      }
+      const mesh1 = createMesh(0xff9966);
+      mesh1.position.set(-150, 0.0, 0.0);
+      scene.add(mesh1);
+      const mesh2 = createMesh(0x66ff99);
+      scene.add(mesh2);
+      const mesh3 = createMesh(0x9966ff);
+      mesh3.position.set(150.0, 0.0, 0.0);
+      scene.add(mesh3);
+
+      scene.add(new THREE.AmbientLight(0xcccccc));
+      const mainLight = new THREE.DirectionalLight(0xffffff, 4.0);
+      mainLight.position.set(1.0, 1.0, 1.0);
+      scene.add(mainLight);
+      const sideLight = new THREE.DirectionalLight(0xffffff, 2.0);
+      sideLight.position.set(-1.0, 0.0, -0.5);
+      scene.add(sideLight);
+
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const stats = new Stats();
+      document.body.appendChild(stats.dom);
+
+      const clock = new THREE.Clock();
+
+      animate();
+      function animate() {
+        requestAnimationFrame(animate);
+        stats.update();
+        controls.update();
+        const time = clock.getElapsedTime();
+        background.material.uniforms.time.value = time;
+        mesh1.rotation.set(time * 0.42, -time * 0.65, 0.0);
+        mesh2.rotation.set(-time * 0.39, 0.0, time * 0.78);
+        mesh3.rotation.set(0.0, time * 0.54, -time * 0.49);
+        renderer.render(scene, camera);
+      }
+
+    </script>
+  </body>
+</html>

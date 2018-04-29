@@ -17,3 +17,9 @@ https://aadebdeb.github.io/study-three.js/shadermaterial-with-lighting.html
 https://aadebdeb.github.io/study-three.js/gpgpu-life-game.html
 
 ![animation gif for "GPGPU Life Game"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/gpgpu-life-game.gif)
+
+## #4 Background Shader
+
+https://aadebdeb.github.io/study-three.js/background-shader.html
+
+![animation gif for "Background Shader"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/background-shader.gif)
