@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>GPGPU Particles with Curl Noise</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/controls/OrbitControls.js"></script>
+    <script src="./js/GPUComputationRenderer.js"></script>
+    <script src="./js/stats.js"></script>
+    <script src="./js/dat.gui.js"></script>
+    <script id="positionShader" type="x-shader/x-fragment">
+
+      #define PI 3.14159265359
+      #define TWO_PI 6.28318530718
+
+      uniform float delta;
+      uniform float boundingRadius;
+
+      float random(in vec2 st) {
+          return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      vec3 randomInSphere(in vec2 st) {
+        float radius = random(st);
+        float theta = PI * random(st + vec2(1000.0));
+        float phi = TWO_PI * random(st + vec2(2000.0));
+        return radius * vec3(sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi));
+      }
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution.xy;
+        vec3 pos = texture2D(positionTexture, uv).xyz;
+        vec3 vel = texture2D(velocityTexture, uv).xyz;
+        pos += vel * delta;
+        if (length(pos) > boundingRadius) {
+          pos = randomInSphere(uv) * boundingRadius;
+        }
+        gl_FragColor = vec4(pos, 1.0);
+      }
+    </script>
+    <script id="velocityShader" type="x-shader/x-fragment">
+      //
+      // Description : Array and textureless GLSL 2D/3D/4D simplex
+      //               noise functions.
+      //      Author : Ian McEwan, Ashima Arts.
+      //  Maintainer : stegu
+      //     Lastmod : 20110822 (ijm)
+      //     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+      //               Distributed under the MIT License. See LICENSE file.
+      //               https://github.com/ashima/webgl-noise
+      //               https://github.com/stegu/webgl-noise
+      //
+
+      vec3 mod289(vec3 x) {
+        return x - floor(x * (1.0 / 289.0)) * 289.0;
+      }
+
+      vec4 mod289(vec4 x) {
+        return x - floor(x * (1.0 / 289.0)) * 289.0;
+      }
+
+      vec4 permute(vec4 x) {
+           return mod289(((x*34.0)+1.0)*x);
+      }
+
+      vec4 taylorInvSqrt(vec4 r)
+      {
+        return 1.79284291400159 - 0.85373472095314 * r;
+      }
+
+      float snoise(vec3 v)
+        {
+        const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+        const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+
+      // First corner
+        vec3 i  = floor(v + dot(v, C.yyy) );
+        vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+      // Other corners
+        vec3 g = step(x0.yzx, x0.xyz);
+        vec3 l = 1.0 - g;
+        vec3 i1 = min( g.xyz, l.zxy );
+        vec3 i2 = max( g.xyz, l.zxy );
+
+        //   x0 = x0 - 0.0 + 0.0 * C.xxx;
+        //   x1 = x0 - i1  + 1.0 * C.xxx;
+        //   x2 = x0 - i2  + 2.0 * C.xxx;
+        //   x3 = x0 - 1.0 + 3.0 * C.xxx;
+        vec3 x1 = x0 - i1 + C.xxx;
+        vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+        vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+
+      // Permutations
+        i = mod289(i);
+        vec4 p = permute( permute( permute(
+                   i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                 + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+                 + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+
+      // Gradients: 7x7 points over a square, mapped onto an octahedron.
+      // The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)
+        float n_ = 0.142857142857; // 1.0/7.0
+        vec3  ns = n_ * D.wyz - D.xzx;
+
+        vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+
+        vec4 x_ = floor(j * ns.z);
+        vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+        vec4 x = x_ *ns.x + ns.yyyy;
+        vec4 y = y_ *ns.x + ns.yyyy;
+        vec4 h = 1.0 - abs(x) - abs(y);
+
+        vec4 b0 = vec4( x.xy, y.xy );
+        vec4 b1 = vec4( x.zw, y.zw );
+
+        //vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;
+        //vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;
+        vec4 s0 = floor(b0)*2.0 + 1.0;
+        vec4 s1 = floor(b1)*2.0 + 1.0;
+        vec4 sh = -step(h, vec4(0.0));
+
+        vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+        vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+        vec3 p0 = vec3(a0.xy,h.x);
+        vec3 p1 = vec3(a0.zw,h.y);
+        vec3 p2 = vec3(a1.xy,h.z);
+        vec3 p3 = vec3(a1.zw,h.w);
+
+      //Normalise gradients
+        vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+        p0 *= norm.x;
+        p1 *= norm.y;
+        p2 *= norm.z;
+        p3 *= norm.w;
+
+      // Mix final noise value
+        vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+        m = m * m;
+        return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1),
+                                      dot(p2,x2), dot(p3,x3) ) );
+      }
+
+      // referred https://qiita.com/nyamadandan/items/2a8bc7a3639e7b5ce9c9
+      vec3 snoise3(in vec3 v) {
+        float x = snoise(v);
+        float y = snoise(v + vec3(12454.454));
+        float z = snoise(v + vec3(21654.575));
+        return vec3(x, y, z);
+      }
+
+      vec3 cnoise(in vec3 v) {
+        const float e = 0.001;
+        vec3 dx = vec3(e, 0.0, 0.0);
+        vec3 dy = vec3(0.0, e, 0.0);
+        vec3 dz = vec3(0.0, 0.0, e);
+
+        vec3 px0 = snoise3(v - dx);
+        vec3 px1 = snoise3(v + dx);
+        vec3 py0 = snoise3(v - dy);
+        vec3 py1 = snoise3(v + dy);
+        vec3 pz0 = snoise3(v - dz);
+        vec3 pz1 = snoise3(v + dz);
+
+        float x = (py1.z - py0.z) - (pz1.y - pz0.y);
+        float y = (pz1.x - pz0.x) - (px1.z - px0.z);
+        float z = (px1.y - px0.y) - (py1.x - py0.x);
+
+        return normalize(vec3(x, y, z) / (2.0 * e));
+      }
+
+      uniform float delta;
+      uniform float noiseScale;
+      uniform float noiseForce;
+      uniform float maxSpeed;
+
+      void main() {
+          vec2 uv = gl_FragCoord.xy / resolution.xy;
+          vec3 pos = texture2D(positionTexture, uv).xyz;
+          vec3 vel = texture2D(velocityTexture, uv).xyz;
+          vec3 newVel = vel + cnoise(pos * noiseScale + 10000.0) * noiseForce * delta;
+          if (dot(newVel, newVel) > 10.0) {
+            newVel = normalize(newVel) * 10.0;
+          }
+          gl_FragColor = vec4(newVel, 1.0);
+      }
+    </script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+
+      uniform sampler2D positionTexture;
+      uniform float cameraConstant;
+      uniform float boundingRadius;
+      uniform float hue;
+      uniform float hueRange;
+      uniform float particleSize;
+
+      varying vec3 vColor;
+
+      float random(in vec2 st) {
+          return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453123);
+      }
+
+      vec3 hsv2rgb(float h, float s, float v) {
+        h = mod(h, 1.0) * 360.0;
+        if (s == 0.0) {
+          return vec3(0.0, 0.0, 0.0);
+        }
+        float c = v * s;
+        float i = h / 60.0;
+        float x = c * (1.0 - abs(mod(i, 2.0) - 1.0));
+        return vec3(v - c) + (i < 1.0 ? vec3(c, x, 0.0) :
+                              i < 2.0 ? vec3(x, c, 0.0) :
+                              i < 3.0 ? vec3(0.0, c, x) :
+                              i < 4.0 ? vec3(0.0, x, c) :
+                              i < 5.0 ? vec3(x, 0.0, c) :
+                              vec3(c, 0.0, x));
+      }
+
+      void main() {
+        float h = hue + (random(uv) * hueRange * 2.0 - hueRange);
+        vColor = hsv2rgb(h, 1.0, 1.0);
+        vec3 pos = texture2D(positionTexture, uv).xyz;
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        gl_PointSize = (1.0 - smoothstep(boundingRadius * 0.8, boundingRadius, length(pos))) * particleSize * cameraConstant / (-mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+
+      varying vec3 vColor;
+
+      void main() {
+        float f = length(gl_PointCoord - vec2(0.5));
+        if (f > 0.5) {
+          discard;
+        }
+        gl_FragColor = vec4(vColor * 0.5 + 0.5, 0.5);
+      }
+
+    </script>
+    <script>
+
+      let renderer, scene, camera, controls;
+      let textureWidth, particleNum;
+      let gpuCompute, positionVariable, positionUniforms, velocityUniforms, particleUniforms;
+      let gui, guiParmeters, clock, stats;
+      let requestId;
+
+      initialize();
+      animate();
+
+      function initialize() {
+        renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 50000);
+        camera.position.set(500, 500, 500);
+        controls = new THREE.OrbitControls(camera);
+
+        stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        guiParameters = {
+          dynamic: {
+            boundingRadius: 750,
+            particleSize: 1,
+            maxSpeed: 10,
+            hue: 0.4,
+            hueRange: 0.1,
+            noiseScale: 0.01,
+            noiseForce: 5.0,
+          },
+          static: {
+            textureWidth: 256,
+            particleNum: 256 * 256,
+            initialBoxSize: 150.0,
+          },
+          reset: () => {
+            cancelAnimationFrame(requestId);
+            reset();
+            animate();
+          }
+        };
+
+        const gui =  new dat.GUI();
+        const guiDynamic = gui.addFolder('Dynamic Parameters');
+        guiDynamic.add(guiParameters.dynamic, 'boundingRadius', 500, 1000);
+        guiDynamic.add(guiParameters.dynamic, 'particleSize', 0, 2);
+        guiDynamic.add(guiParameters.dynamic, 'maxSpeed', 1, 100);
+        guiDynamic.add(guiParameters.dynamic, 'hue', 0, 1);
+        guiDynamic.add(guiParameters.dynamic, 'hueRange', 0, 0.5);
+        guiDynamic.add(guiParameters.dynamic, 'noiseScale', 0.0, 0.02);
+        guiDynamic.add(guiParameters.dynamic, 'noiseForce', 0, 100);
+        const guiStatic = gui.addFolder('Static Parameters');
+        guiStatic.add(guiParameters.static, 'initialBoxSize', 50, 300);
+        guiStatic.add(guiParameters.static, 'textureWidth', 32, 1024).step(1).onChange((value) => {
+          guiParameters.static.particleNum = value * value;
+        });
+        guiStatic.add(guiParameters.static, 'particleNum').listen();
+        gui.add(guiParameters, 'reset');
+
+        window.addEventListener('resize', onResize, false);
+
+        reset();
+      }
+
+      function reset() {
+        initializeGpuCompute();
+
+        scene = new THREE.Scene();
+        const geometry = new THREE.BufferGeometry();
+        const positionAttribute = new THREE.BufferAttribute(new Float32Array(particleNum * 3), 3);
+        const uvAttribute = new THREE.BufferAttribute(new Float32Array(particleNum * 3), 3);
+        for (let i = 0; i < particleNum; i += 1) {
+          positionAttribute.array[i * 3 + 0] = 0;
+          positionAttribute.array[i * 3 + 1] = 0;
+          positionAttribute.array[i * 3 + 2] = 0;
+        }
+        for (let i = 0, p = 0; i < textureWidth; i++) {
+          for (let j = 0; j < textureWidth; j++) {
+            uvAttribute.array[p++] = (i + 0.5) / textureWidth;
+            uvAttribute.array[p++] = (j + 0.5) / textureWidth;
+          }
+        }
+        geometry.addAttribute('position', positionAttribute);
+        geometry.addAttribute('uv', uvAttribute);
+
+        particleUniforms = {
+          positionTexture: {value: null},
+          cameraConstant: {value: getCameraConstant(camera)},
+          boundingRadius: {value: 0.0},
+          hue: {value: 0.0},
+          hueRange: {value: 0.0},
+          particleSize: {value: 0.0},
+        };
+        const material = new THREE.ShaderMaterial({
+          uniforms: particleUniforms,
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent,
+          transparent: true,
+          blending: THREE.AdditiveBlending
+        })
+        const particles = new THREE.Points(geometry, material);
+        particles.matrixAutoUpdate = false;
+        particles.updateMatrix();
+        scene.add(particles);
+
+        setGuiParametersToUniforms();
+
+        clock = new THREE.Clock();
+      }
+
+      function initializeGpuCompute() {
+        textureWidth = guiParameters.static.textureWidth;
+        particleNum = textureWidth * textureWidth;
+        gpuCompute = new GPUComputationRenderer(textureWidth, textureWidth, renderer);
+        const positionTexture = gpuCompute.createTexture();
+        const velocityTexture = gpuCompute.createTexture();
+
+        function fillTextures() {
+          const positionArray = positionTexture.image.data;
+          const velocityArray = velocityTexture.image.data;
+          const initialBoxSize = guiParameters.static.initialBoxSize;
+          for (var i = 0, l = positionArray.length; i < l; i += 4) {
+            positionArray[i + 0] = Math.random() * initialBoxSize * 2.0 - initialBoxSize;
+            positionArray[i + 1] = Math.random() * initialBoxSize * 2.0 - initialBoxSize;
+            positionArray[i + 2] = Math.random() * initialBoxSize * 2.0 - initialBoxSize;
+            positionArray[i + 3] = 1.0;
+
+            velocityArray[i + 0] = 0.0;
+            velocityArray[i + 1] = 0.0;
+            velocityArray[i + 2] = 0.0;
+            velocityArray[i + 3] = 0.0;
+          }
+        }
+        fillTextures();
+
+        positionVariable = gpuCompute.addVariable('positionTexture', document.getElementById('positionShader').textContent, positionTexture);
+        const velocityVariable = gpuCompute.addVariable('velocityTexture', document.getElementById('velocityShader').textContent, velocityTexture);
+        positionUniforms = positionVariable.material.uniforms;
+        velocityUniforms = velocityVariable.material.uniforms;
+        positionUniforms.delta = {value: 0.0};
+        positionUniforms.boundingRadius = {value: 0.0};
+        velocityUniforms.delta = {value: 0.0};
+        velocityUniforms.maxSpeed = {value: 0.0};
+        velocityUniforms.noiseScale = {value: 0.0};
+        velocityUniforms.noiseForce = {value: 0.0};
+
+        gpuCompute.setVariableDependencies(positionVariable, [positionVariable, velocityVariable]);
+        gpuCompute.setVariableDependencies(velocityVariable, [positionVariable, velocityVariable]);
+
+        const error = gpuCompute.init();
+        if (error !== null) {
+          console.error(error);
+        }
+      }
+
+      function setGuiParametersToUniforms() {
+        positionUniforms.boundingRadius.value = guiParameters.boundingRadius;
+        velocityUniforms.maxSpeed.value = guiParameters.dynamic.maxSpeed;
+        velocityUniforms.noiseScale.value = guiParameters.dynamic.noiseScale;
+        velocityUniforms.noiseForce.value = guiParameters.dynamic.noiseForce;
+        particleUniforms.boundingRadius.value = guiParameters.boundingRadius;
+        particleUniforms.particleSize.value = guiParameters.dynamic.particleSize;
+        particleUniforms.hue.value = guiParameters.dynamic.hue;
+        particleUniforms.hueRange.value = guiParameters.dynamic.hueRange;
+      }
+
+      function getCameraConstant(camera) {
+        return window.innerHeight / (Math.tan(THREE.Math.DEG2RAD * 0.5 * camera.fov) / camera.zoom);
+      }
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        particleUniforms.cameraConstant.value = getCameraConstant(camera);
+      }
+
+      function animate() {
+        requestId = requestAnimationFrame(animate);
+        const delta = Math.min(clock.getDelta(), 0.2);
+        positionUniforms.delta.value = delta;
+        velocityUniforms.delta.value = delta;
+        gpuCompute.compute();
+        stats.update();
+        particleUniforms.positionTexture.value = gpuCompute.getCurrentRenderTarget(positionVariable).texture;
+        setGuiParametersToUniforms();
+
+        renderer.render(scene, camera);
+      }
+
+    </script>
+  </body>
+</html>

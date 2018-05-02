@@ -23,3 +23,9 @@ https://aadebdeb.github.io/study-three.js/gpgpu-life-game.html
 https://aadebdeb.github.io/study-three.js/background-shader.html
 
 ![animation gif for "Background Shader"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/background-shader.gif)
+
+## #5 GPGPU Particles with Curl Noise
+
+https://aadebdeb.github.io/study-three.js/gpgpu-particles-with-curl-noise.html
+
+![animation gif for "Background Shader"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/gpgpu-particles-with-curl-noise.gif)
