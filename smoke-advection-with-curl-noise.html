@@ -273,7 +273,7 @@
       uniform vec3 boxSize;
       uniform vec3 lightColor;
       uniform float lightIntensity;
-      uniform bool smokeShadow;
+      uniform bool smokeShade;
 
       bool isValidGrid(in vec3 grid) {
         return grid.x >= 0.0 && grid.x < gridNum.x - 1.0 &&
@@ -348,14 +348,14 @@
         return true;
       }
 
-      const vec3 lightPosition = vec3(0.0, 100.0, 0.0);
+      const vec3 lightPosition = vec3(0.0, 150.0, 0.0);
       const vec3 lightDirection = normalize(-lightPosition);
       const vec3 floorColor = vec3(0.7);
 
       vec3 light(in vec3 position) {
         vec3 positionDirection = normalize(position - lightPosition);
         float cosTheta = dot(lightDirection, positionDirection);
-        return lightIntensity * lightColor * pow(cosTheta, 4.0) * smoothstep(0.8, 0.85, cosTheta);
+        return lightIntensity * lightColor * pow(cosTheta, 4.0) * smoothstep(0.9, 0.95, cosTheta);
       }
 
       float densityForFloorShadow(in vec3 rayOrigin, in vec3 rayDirection) {
@@ -363,9 +363,9 @@
         float tmax = 1e20;
         if (!intersectBox(rayOrigin, rayDirection, boxSize, tmin, tmax)) return 0.0;
         float t = tmin;
-        float step = length(boxSize) / float(5);
+        float step = length(boxSize) / float(10);
         float sum = 0.0;
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 10; i++) {
           vec3 p = rayOrigin + t * rayDirection;
           float dens = map(p).w;
           sum += (1.0 - sum) * dens;
@@ -380,9 +380,10 @@
         vec3 normal = vec3(0.0, 1.0, 0.0);
         if (dot(normal, rayDirection) < 0.0 && intersectPlane(rayOrigin, rayDirection, -50.0, t) && t > 0.0) {
           vec3 pos = rayOrigin + t * rayDirection;
+          vec3 dirToLight = normalize(lightPosition - pos);
           vec3 l = light(pos);
-          float shadow = 0.3 + 0.7 * (1.0 - densityForFloorShadow(pos, -lightDirection));
-          return floorColor * l * shadow;
+          float shade = 0.5 + 0.5 * (1.0 - densityForFloorShadow(pos, dirToLight));
+          return floorColor * l * shade;
         }
         return vec3(0.0);
       }
@@ -402,7 +403,7 @@
           vec3 c = res.rgb;
           vec3 l = light(p);
           c *= l;
-          if (smokeShadow) {
+          if (smokeShade) {
             vec3 dirToLight = normalize(lightPosition - p);
             float occ = (map(p + dirToLight * step * 2.0).w + map(p + dirToLight * step * 4.0).w + map(p + dirToLight * step * 6.0).w) / 3.0;
             c *= 0.7 + 0.3 * smoothstep(0.0, 0.5, 1.0 - occ);
@@ -459,7 +460,7 @@
             dissipationRate: 0.05,
             lightColor: [255, 255, 255],
             lightIntensity: 1.0,
-            smokeShadow: true,
+            smokeShade: true,
           },
           static: {
             gridNum: 50,
@@ -482,7 +483,7 @@
         guiDynamic.add(guiParameters.dynamic, 'dissipationRate', 0.0, 1.0);
         guiDynamic.addColor(guiParameters.dynamic, 'lightColor');
         guiDynamic.add(guiParameters.dynamic, 'lightIntensity', 0.5, 3.0);
-        guiDynamic.add(guiParameters.dynamic, 'smokeShadow');
+        guiDynamic.add(guiParameters.dynamic, 'smokeShade');
         const guiStatic = gui.addFolder('Static Parameters');
         guiStatic.add(guiParameters.static, 'gridNum', 10, 100).step(1);
         guiStatic.add(guiParameters.static, 'boxSize', 10, 100);
@@ -506,7 +507,7 @@
           boxSize: {value: null},
           lightColor: {value: new THREE.Vector3(0.0, 0.0, 0.0)},
           lightIntensity: {value: 0.0},
-          smokeShadow: {value: false}
+          smokeShade: {value: false}
         };
         const material = new THREE.RawShaderMaterial({
           uniforms: renderUniforms,
@@ -610,7 +611,7 @@
         renderUniforms.lightColor.value.y = guiParameters.dynamic.lightColor[1] / 255.0;
         renderUniforms.lightColor.value.z = guiParameters.dynamic.lightColor[2] / 255.0;
         renderUniforms.lightIntensity.value = guiParameters.dynamic.lightIntensity;
-        renderUniforms.smokeShadow.value = guiParameters.dynamic.smokeShadow;
+        renderUniforms.smokeShade.value = guiParameters.dynamic.smokeShade;
         renderer.render(scene, camera);
       }
     </script>
