@@ -34,4 +34,4 @@ https://aadebdeb.github.io/study-three.js/gpgpu-particles-with-curl-noise.html
 
 https://aadebdeb.github.io/study-three.js/smoke-advection-with-curl-noise.html
 
-![animation gif for "Smoke Advection with Curl Noise"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/smoke-advection-wth-curl-noise.gif)
+![animation gif for "Smoke Advection with Curl Noise"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/smoke-advection-with-curl-noise.gif)
