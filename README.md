@@ -35,3 +35,9 @@ https://aadebdeb.github.io/study-three.js/gpgpu-particles-with-curl-noise.html
 https://aadebdeb.github.io/study-three.js/smoke-advection-with-curl-noise.html
 
 ![animation gif for "Smoke Advection with Curl Noise"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/smoke-advection-with-curl-noise.gif)
+
+## #7 Ineraction with GPGPU Particles and Mouse
+
+https://aadebdeb.github.io/study-three.js/interaction-with-gpgpu-particles-and-mouse.html
+
+![animation gif for "Ineraction with GPGPU Particles and Mouse"](https://github.com/aadebdeb/study-three.js/raw/master/screenshots/interaction-with-gpgpu-particles-and-mouse.gif)

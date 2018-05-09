@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Interaction with GPGPU Particles and Mouse</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/controls/OrbitControls.js"></script>
+    <script src="./js/GPUComputationRenderer.js"></script>
+    <script src="./js/stats.js"></script>
+    <script src="./js/dat.gui.js"></script>
+    <script id="positionShader" type="x-shader/x-fragment">
+
+      uniform float deltaTime;
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution;
+        vec3 pos = texture2D(positionTexture, uv).xyz;
+        vec3 vel = texture2D(velocityTexture, uv).xyz;
+        pos += vel * deltaTime;
+        gl_FragColor = vec4(pos, 1.0);
+      }
+    </script>
+    <script id="velocityShader" type="x-shader/x-fragment">
+
+      uniform bool canMove;
+      uniform vec3 prevRayOrigin;
+      uniform vec3 prevRayDir;
+      uniform vec3 currentRayOrigin;
+      uniform vec3 currentRayDir;
+      uniform float deltaTime;
+      uniform float maxSpeed;
+      uniform float maxForce;
+      uniform float forceDistance;
+      uniform float resistance;
+
+      vec3 rayPointPerpendicularIntersection(vec3 ro, vec3 rd, vec3 p) {
+        vec3 op = p - ro;
+        float d = dot(op, rd);
+        return ro + d * rd;
+      }
+
+      float rayPointDistance(vec3 ro, vec3 rd, vec3 p) {
+        float distOP = distance(ro, p);
+        vec3 op = normalize(p - ro);
+        float cosTheta = dot(rd, op);
+        return distOP * sqrt(1.0 - cosTheta * cosTheta);
+      }
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution;
+        vec3 pos = texture2D(positionTexture, uv).xyz;
+        vec3 vel = texture2D(velocityTexture, uv).xyz;
+
+        if (canMove) {
+          vec3 prevPoint = rayPointPerpendicularIntersection(prevRayOrigin, prevRayDir, pos);
+          float prevDist = distance(pos, prevPoint);
+          vec3 currentPoint = rayPointPerpendicularIntersection(currentRayOrigin, currentRayDir, pos);
+          float currentDist = distance(pos, currentPoint);
+          float dist = min(prevDist, currentDist);
+          if (distance(prevPoint, currentPoint) > 0.0001) {
+            vec3 forceDir = normalize(currentPoint - prevPoint);
+            vel += forceDir * maxForce * max(0.0, 1.0 - dist / forceDistance) * deltaTime;
+          }
+
+          vel *= 1.0 - resistance * deltaTime;
+
+          if (dot(vel, vel) > maxSpeed * maxSpeed) {
+            vel = normalize(vel) * maxSpeed;
+          }
+        }
+
+        gl_FragColor = vec4(vel, 1.0);
+      }
+    </script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+
+      uniform sampler2D positionTexture;
+      uniform sampler2D velocityTexture;
+      uniform float cameraConstant;
+      uniform float maxSpeed;
+      uniform float pointSize;
+      uniform vec3 pointColor;
+
+      varying vec3 vColor;
+
+      void main() {
+        vec3 pos = texture2D(positionTexture, uv).xyz;
+        vec3 vel = texture2D(velocityTexture, uv).xyz;
+        vColor = 0.3 * vec3(1.0) + 0.7 * pointColor * pow(length(vel) / maxSpeed, 0.5);
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        gl_PointSize = pointSize * cameraConstant / (-mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-vertex">
+
+      varying vec3 vColor;
+
+      void main() {
+        float f = length(gl_PointCoord - vec2(0.5));
+        if (f > 0.5) {
+          discard;
+        }
+        gl_FragColor = vec4(vColor, 0.7);
+      }
+    </script>
+    <script>
+      let camera, controls, scene, renderer, particleUniforms;
+      let gpuCompute, positionVariable, positionUniforms, velocityVariable, velocityUniforms;
+      let requestId, clock, stats, gui, guiParameters, prevMouse, currentMouse, isMouseMoved;
+
+      let textureWidth, particleNum;
+
+      initialize();
+      animate();
+
+      function initialize() {
+        renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 30000);
+        camera.position.set(0, 1000, 2500);
+        controls = new THREE.OrbitControls(camera);
+
+        prevMouse = new THREE.Vector2(0.0, 0.0);
+        currentMouse = new THREE.Vector2(0.0, 0.0);
+        document.addEventListener('mousemove', onMouseMove, false);
+
+        window.addEventListener('resize', onResize, false);
+
+        stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        guiParameters = {
+          dynamic: {
+            maxSpeed: 100.0,
+            maxForce: 200.0,
+            forceDistance: 100.0,
+            resistance: 0.1,
+            pointSize: 3.0,
+            pointColor: [235, 160, 245],
+          },
+          static: {
+            textureWidth: 256,
+            particleNum: 256 * 256,
+          },
+          reset: () => {
+            cancelAnimationFrame(requestId);
+            reset();
+            animate();
+          }
+        };
+
+        const gui = new dat.GUI();
+        const guiDynamic = gui.addFolder('Dynamic Parameters');
+        guiDynamic.add(guiParameters.dynamic, 'maxSpeed', 10.0, 500.0);
+        guiDynamic.add(guiParameters.dynamic, 'maxForce', 10.0, 500.0);
+        guiDynamic.add(guiParameters.dynamic, 'forceDistance', 10, 500.0);
+        guiDynamic.add(guiParameters.dynamic, 'resistance', 0.0, 0.5);
+        guiDynamic.add(guiParameters.dynamic, 'pointSize', 1, 20);
+        guiDynamic.addColor(guiParameters.dynamic, 'pointColor');
+        const guiStatic = gui.addFolder('Static Parameters');
+        gui.add(guiParameters, 'reset');
+        guiStatic.add(guiParameters.static, 'textureWidth', 32, 1024).step(1).onChange((value) => {
+          guiParameters.static.particleNum = value * value;
+        });
+        guiStatic.add(guiParameters.static, 'particleNum').listen();
+        reset();
+      }
+
+      function onMouseMove(event) {
+        if (!isMouseMoved) {
+          prevMouse.copy(currentMouse);
+        }
+        isMouseMoved = true;
+        currentMouse.x = (event.clientX / window.innerWidth) * 2.0 - 1.0;
+        currentMouse.y = 1.0 - (event.clientY / window.innerHeight) * 2.0;
+      }
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        particleUniforms.cameraConstant.value = getCameraConstant(camera);
+      }
+
+      function reset() {
+        initializeGpuCompute();
+        scene = new THREE.Scene();
+        initializeParticles();
+        clock = new THREE.Clock();
+      }
+
+      function initializeGpuCompute() {
+        textureWidth = guiParameters.static.textureWidth;
+        particleNum = textureWidth * textureWidth;
+        gpuCompute = new GPUComputationRenderer(textureWidth, textureWidth, renderer);
+        const positionTexture = gpuCompute.createTexture();
+        const velocityTexture = gpuCompute.createTexture();
+        fillTextureAsCircle(positionTexture, velocityTexture);
+        positionVariable = gpuCompute.addVariable('positionTexture', document.getElementById('positionShader').textContent, positionTexture);
+        velocityVariable = gpuCompute.addVariable('velocityTexture', document.getElementById('velocityShader').textContent, velocityTexture);
+        positionUniforms = positionVariable.material.uniforms;
+        positionUniforms.deltaTime = {value: 0.0};
+        velocityUniforms = velocityVariable.material.uniforms;
+        velocityUniforms.canMove = {value: false};
+        velocityUniforms.prevRayOrigin = {value: new THREE.Vector3()};
+        velocityUniforms.prevRayDir = {value: new THREE.Vector3()};
+        velocityUniforms.currentRayOrigin = {value: new THREE.Vector3()};
+        velocityUniforms.currentRayDir = {value: new THREE.Vector3()};
+        velocityUniforms.deltaTime = {value: 0.0};
+        velocityUniforms.maxSpeed = {value: 0.0};
+        velocityUniforms.maxForce = {value: 0.0};
+        velocityUniforms.forceDistance = {value: 0.0};
+        velocityUniforms.resistance = {value: 0.0};
+        gpuCompute.setVariableDependencies(positionVariable, [positionVariable, velocityVariable]);
+        gpuCompute.setVariableDependencies(velocityVariable, [positionVariable, velocityVariable]);
+
+        const error = gpuCompute.init();
+        if (error != null) {
+          console.error(error);
+        }
+      }
+
+      function fillTextureAsCircle(positionTexture, velocityTexture) {
+        const positionArray = positionTexture.image.data;
+        const velocityArray = velocityTexture.image.data;
+        for (let i = 0, l = positionArray.length; i < l; i += 4) {
+          let x, z;
+          while(true) {
+            x = Math.random() * 3000 - 1500;
+            z = Math.random() * 3000 - 1500;
+            if (x * x + z * z < 1500 * 1500) {break;}
+          }
+          positionArray[i + 0] = x;
+          positionArray[i + 1] = Math.random() * 10.0 - 5.0;
+          positionArray[i + 2] = z;
+          positionArray[i + 3] = 1.0;
+          velocityArray[i + 0] = 0.0;
+          velocityArray[i + 1] = 0.0;
+          velocityArray[i + 2] = 0.0;
+          velocityArray[i + 3] = 0.0;
+        }
+      }
+
+      function initializeParticles() {
+        const geometry = new THREE.BufferGeometry();
+        const positionAttribute = new THREE.BufferAttribute(new Float32Array(particleNum * 3), 3);
+        const uvAttribute = new THREE.BufferAttribute(new Float32Array(particleNum * 3), 3);
+        for (let i = 0; i < particleNum; i += 1) {
+          positionAttribute.array[i * 3 + 0] = 0;
+          positionAttribute.array[i * 3 + 1] = 0;
+          positionAttribute.array[i * 3 + 2] = 0;
+        }
+        for (let i = 0, p = 0; i < textureWidth; i++) {
+          for (let j = 0; j < textureWidth; j++) {
+            uvAttribute.array[p++] = (i + 0.5) / textureWidth;
+            uvAttribute.array[p++] = (j + 0.5) / textureWidth;
+          }
+        }
+        geometry.addAttribute('position', positionAttribute);
+        geometry.addAttribute('uv', uvAttribute);
+
+        particleUniforms = {
+          positionTexture: {value: null},
+          velocityTexture: {value: null},
+          cameraConstant: {value: getCameraConstant(camera)},
+          maxSpeed: {value: 0.0},
+          pointSize: {value: 0.0},
+          pointColor: {value: new THREE.Vector3()},
+        };
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: particleUniforms,
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent,
+          transparent: true,
+        });
+        const particles = new THREE.Points(geometry, material);
+        particles.matrixAutoUpdate = false;
+        particles.updateMatrix();
+        scene.add(particles);
+
+        clock = new THREE.Clock();
+      }
+
+      function getCameraConstant(camera) {
+        return window.innerHeight / (Math.tan(THREE.Math.DEG2RAD * 0.5 * camera.fov) / camera.zoom);
+      }
+
+      function animate() {
+        requestId = requestAnimationFrame(animate);
+        stats.update();
+        controls.update();
+        const deltaTime = Math.min(0.2, clock.getDelta());
+        positionUniforms.deltaTime.value = deltaTime;
+        velocityUniforms.canMove.value = isMouseMoved;
+        if (isMouseMoved) {
+          const rayOrigin = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+          const prevRayDir = new THREE.Vector3(prevMouse.x, prevMouse.y, 0.5).unproject(camera).sub(rayOrigin).normalize();
+          const currentRayDir = new THREE.Vector3(currentMouse.x, currentMouse.y, 0.5).unproject(camera).sub(rayOrigin).normalize();
+          velocityUniforms.prevRayOrigin.value.copy(rayOrigin);
+          velocityUniforms.prevRayDir.value.copy(prevRayDir);
+          velocityUniforms.currentRayOrigin.value.copy(rayOrigin);
+          velocityUniforms.currentRayDir.value.copy(currentRayDir);
+        }
+        velocityUniforms.deltaTime.value = deltaTime;
+        velocityUniforms.maxSpeed.value = guiParameters.dynamic.maxSpeed;
+        velocityUniforms.maxForce.value = guiParameters.dynamic.maxForce;
+        velocityUniforms.forceDistance.value = guiParameters.dynamic.forceDistance;
+        velocityUniforms.resistance.value = guiParameters.dynamic.resistance;
+        gpuCompute.compute();
+        particleUniforms.positionTexture.value = gpuCompute.getCurrentRenderTarget(positionVariable).texture;
+        particleUniforms.velocityTexture.value = gpuCompute.getCurrentRenderTarget(velocityVariable).texture;
+        particleUniforms.maxSpeed.value = guiParameters.dynamic.maxSpeed;
+        particleUniforms.pointSize.value = guiParameters.dynamic.pointSize;
+        particleUniforms.pointColor.value.x = guiParameters.dynamic.pointColor[0] / 255.0;
+        particleUniforms.pointColor.value.y = guiParameters.dynamic.pointColor[1] / 255.0;
+        particleUniforms.pointColor.value.z = guiParameters.dynamic.pointColor[2] / 255.0;
+        renderer.render(scene, camera);
+
+        isMouseMoved = false;
+      }
+    </script>
+  </body>
+</html>
