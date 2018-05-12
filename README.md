@@ -46,4 +46,4 @@ https://aadebdeb.github.io/study-three.js/interaction-with-gpgpu-particles-and-m
 
 https://aadebdeb.github.io/study-three.js/raymarching-with-threejs-camera.html
 
-![animation gif for "Raymarching with three.js Camera"](https://aadebdeb.github.io/study-three.js/gscreenshots/raymarching-with-threejs-camera.png)
+![animation gif for "Raymarching with three.js Camera"](https://aadebdeb.github.io/study-three.js/screenshots/raymarching-with-threejs-camera.png)
