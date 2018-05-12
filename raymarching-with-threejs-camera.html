@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Raymarching with Three.js Camera</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #000000;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/controls/OrbitControls.js"></script>
+    <script src="./js/stats.js"></script>
+    <script src="./js/dat.gui.js"></script>
+    <script id="vertexShader" type="x-shaderx-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+
+      void main() {
+        gl_Position = vec4(position, 1.0);
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+      precision highp float;
+
+      #define PI 3.14159265359
+
+      uniform vec2 resolution;
+      uniform vec3 cameraPosition;
+      uniform vec3 cameraDirection;
+      uniform float cameraAspect;
+      uniform float cameraFov;
+
+      float sphere(in vec3 p, in float r) {
+        return length(p) - r;
+      }
+
+      float box(in vec3 pos, in vec3 size) {
+        vec3 d = abs(pos) - size;
+        return min(max(d.x, max(d.y, d.z)), 0.0) + length(max(d, 0.0));
+      }
+
+      float scene(in vec3 pos) {
+        float sphere =  sphere(pos + vec3(100.0, 0.0, 0.0), 50.0);
+        float box = box(pos + vec3(-100.0, 0.0, 0.0), vec3(50.0));
+        return min(sphere, box);
+      }
+
+      vec3 normal(in vec3 pos) {
+        float e = 0.01;
+        return normalize(vec3(
+          scene(pos + vec3(e, 0.0, 0.0)) - scene(pos - vec3(e, 0.0, 0.0)),
+          scene(pos + vec3(0.0, e, 0.0)) - scene(pos - vec3(0.0, e, 0.0)),
+          scene(pos + vec3(0.0, 0.0, e)) - scene(pos - vec3(0.0, 0.0, e))
+        ) / (2.0 * e));
+      }
+
+      vec3 raymarch(in vec3 rayOrigin, in vec3 rayDirection) {
+        float t = 0.01;
+        for (int i = 0; i < 100; i++) {
+          vec3 pos = rayOrigin + t * rayDirection;
+          float d = scene(pos);
+          if (abs(d) < 0.01) {
+            return normal(pos) * 0.5 + 0.5;
+          }
+          t += d;
+        }
+        return vec3(0.0);
+      }
+
+      void perspectiveCamera(in vec2 uv, in vec3 position, in vec3 cameraDirection, in float fov, in float aspect, out vec3 origin, out vec3 dir) {
+        vec2 st = uv * 2.0 - 1.0;
+        float radian = fov * PI / 180.0;
+        float h = tan(radian * 0.5);
+        float w = h * aspect;
+        vec3 right = normalize(cross(cameraDirection, vec3(0.0, 1.0, 0.0)));
+        vec3 up = normalize(cross(right, cameraDirection));
+        dir = normalize(right * w * st.x + up * h * st.y + cameraDirection);
+        origin = position;
+      }
+
+      void main() {
+        vec3 rayOrigin, rayDirection;
+        perspectiveCamera(gl_FragCoord.xy / resolution, cameraPosition, cameraDirection, cameraFov, cameraAspect, rayOrigin, rayDirection);
+        vec3 color = raymarch(rayOrigin, rayDirection);
+        gl_FragColor = vec4(color, 1.0);
+      }
+    </script>
+    <script>
+
+      const guiParameters = {
+        fov: 45,
+      }
+
+      const gui = new dat.GUI();
+      gui.add(guiParameters, 'fov', 10, 90).onChange((value) => {
+        camera.fov = value;
+        camera.updateProjectionMatrix();
+        raymarchUniforms.cameraFov.value = value;
+      });
+
+      const stats = new Stats();
+      document.body.appendChild(stats.dom);
+
+      const rasterizeRenderer = new THREE.WebGLRenderer();
+      rasterizeRenderer.setSize(window.innerWidth, window.innerHeight * 0.5);
+      document.body.appendChild(rasterizeRenderer.domElement);
+
+      const raymarchRenderer = new THREE.WebGLRenderer();
+      raymarchRenderer.setSize(window.innerWidth, window.innerHeight * 0.5);
+      document.body.appendChild(raymarchRenderer.domElement);
+
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth / (window.innerHeight * 0.5), 1, 10000);
+      camera.position.z = 500;
+      const controls = new THREE.OrbitControls(camera);
+      const fakeCamera = new THREE.Camera();
+
+      const rasterizeScene = new THREE.Scene();
+      const raymarchScene = new THREE.Scene();
+
+      const group = new THREE.Group();
+
+      const sphere = new THREE.Mesh(new THREE.SphereBufferGeometry(50, 24, 18), new THREE.MeshNormalMaterial());
+      sphere.position.set(-100.0, 0.0, 0.0);
+      group.add(sphere);
+
+      const box = new THREE.Mesh(new THREE.BoxBufferGeometry(100, 100, 100), new THREE.MeshNormalMaterial());
+      box.position.set(100.0, 0.0, 0.0);
+      group.add(box);
+
+      rasterizeScene.add(group);
+
+      const raymarchUniforms = {
+        resolution: {value: new THREE.Vector2(window.innerWidth, window.innerHeight / 2.0)},
+        cameraPosition: {value: new THREE.Vector3()},
+        cameraDirection: {value: new THREE.Vector3()},
+        cameraAspect: {value: camera.aspect},
+        cameraFov: {value: camera.fov},
+      };
+
+      raymarchScene.add(new THREE.Mesh(
+        new THREE.PlaneBufferGeometry(2, 2),
+        new THREE.RawShaderMaterial({
+          uniforms: raymarchUniforms,
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent
+        })
+      ));
+
+      window.addEventListener('resize', onResize, false);
+
+      function onResize() {
+        const halfHeight = window.innerHeight / 2.0;
+        rasterizeRenderer.setSize(window.innerWidth, halfHeight);
+        raymarchRenderer.setSize(window.innerWidth, halfHeight);
+        camera.aspect = window.innerWidth / halfHeight;
+        camera.updateProjectionMatrix();
+        raymarchUniforms.resolution.value.set(window.innerWidth, halfHeight);
+        raymarchUniforms.cameraAspect.value = camera.aspect;
+      }
+
+      animate();
+      function animate() {
+        requestAnimationFrame(animate);
+        stats.update();
+        controls.update();
+        camera.getWorldDirection(raymarchUniforms.cameraDirection.value);
+        camera.getWorldPosition(raymarchUniforms.cameraPosition.value);
+
+        rasterizeRenderer.render(rasterizeScene, camera);
+        raymarchRenderer.render(raymarchScene, fakeCamera);
+      }
+    </script>
+  </body>
+</html>
