@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Interaction with Smoke and Mouse</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/controls/OrbitControls.js"></script>
+    <script src="./js/GPUComputationRenderer.js"></script>
+    <script src="./js/stats.js"></script>
+    <script src="./js/dat.gui.js"></script>
+    <script id="smokeShader" type="x-shader/x-fragment">
+      //
+      // Description : Array and textureless GLSL 2D/3D/4D simplex
+      //               noise functions.
+      //      Author : Ian McEwan, Ashima Arts.
+      //  Maintainer : stegu
+      //     Lastmod : 20110822 (ijm)
+      //     License : Copyright (C) 2011 Ashima Arts. All rights reserved.
+      //               Distributed under the MIT License. See LICENSE file.
+      //               https://github.com/ashima/webgl-noise
+      //               https://github.com/stegu/webgl-noise
+      //
+
+      vec3 mod289(vec3 x) {
+        return x - floor(x * (1.0 / 289.0)) * 289.0;
+      }
+
+      vec4 mod289(vec4 x) {
+        return x - floor(x * (1.0 / 289.0)) * 289.0;
+      }
+
+      vec4 permute(vec4 x) {
+           return mod289(((x*34.0)+1.0)*x);
+      }
+
+      vec4 taylorInvSqrt(vec4 r)
+      {
+        return 1.79284291400159 - 0.85373472095314 * r;
+      }
+
+      float snoise(vec3 v)
+        {
+        const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+        const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+
+      // First corner
+        vec3 i  = floor(v + dot(v, C.yyy) );
+        vec3 x0 =   v - i + dot(i, C.xxx) ;
+
+      // Other corners
+        vec3 g = step(x0.yzx, x0.xyz);
+        vec3 l = 1.0 - g;
+        vec3 i1 = min( g.xyz, l.zxy );
+        vec3 i2 = max( g.xyz, l.zxy );
+
+        //   x0 = x0 - 0.0 + 0.0 * C.xxx;
+        //   x1 = x0 - i1  + 1.0 * C.xxx;
+        //   x2 = x0 - i2  + 2.0 * C.xxx;
+        //   x3 = x0 - 1.0 + 3.0 * C.xxx;
+        vec3 x1 = x0 - i1 + C.xxx;
+        vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+        vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+
+      // Permutations
+        i = mod289(i);
+        vec4 p = permute( permute( permute(
+                   i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                 + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+                 + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+
+      // Gradients: 7x7 points over a square, mapped onto an octahedron.
+      // The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)
+        float n_ = 0.142857142857; // 1.0/7.0
+        vec3  ns = n_ * D.wyz - D.xzx;
+
+        vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+
+        vec4 x_ = floor(j * ns.z);
+        vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+
+        vec4 x = x_ *ns.x + ns.yyyy;
+        vec4 y = y_ *ns.x + ns.yyyy;
+        vec4 h = 1.0 - abs(x) - abs(y);
+
+        vec4 b0 = vec4( x.xy, y.xy );
+        vec4 b1 = vec4( x.zw, y.zw );
+
+        //vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;
+        //vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;
+        vec4 s0 = floor(b0)*2.0 + 1.0;
+        vec4 s1 = floor(b1)*2.0 + 1.0;
+        vec4 sh = -step(h, vec4(0.0));
+
+        vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+        vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+
+        vec3 p0 = vec3(a0.xy,h.x);
+        vec3 p1 = vec3(a0.zw,h.y);
+        vec3 p2 = vec3(a1.xy,h.z);
+        vec3 p3 = vec3(a1.zw,h.w);
+
+      //Normalise gradients
+        vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+        p0 *= norm.x;
+        p1 *= norm.y;
+        p2 *= norm.z;
+        p3 *= norm.w;
+
+      // Mix final noise value
+        vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+        m = m * m;
+        return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1),
+                                      dot(p2,x2), dot(p3,x3) ) );
+      }
+
+      // referred https://qiita.com/nyamadandan/items/2a8bc7a3639e7b5ce9c9
+      vec3 snoise3(in vec3 v) {
+        float x = snoise(v);
+        float y = snoise(v + vec3(12454.454));
+        float z = snoise(v + vec3(21654.575));
+        return vec3(x, y, z);
+      }
+
+      vec3 cnoise(in vec3 v) {
+        const float e = 0.001;
+        vec3 dx = vec3(e, 0.0, 0.0);
+        vec3 dy = vec3(0.0, e, 0.0);
+        vec3 dz = vec3(0.0, 0.0, e);
+
+        vec3 px0 = snoise3(v - dx);
+        vec3 px1 = snoise3(v + dx);
+        vec3 py0 = snoise3(v - dy);
+        vec3 py1 = snoise3(v + dy);
+        vec3 pz0 = snoise3(v - dz);
+        vec3 pz1 = snoise3(v + dz);
+
+        float x = (py1.z - py0.z) - (pz1.y - pz0.y);
+        float y = (pz1.x - pz0.x) - (px1.z - px0.z);
+        float z = (px1.y - px0.y) - (py1.x - py0.x);
+
+        return normalize(vec3(x, y, z) / (2.0 * e));
+      }
+
+      #define PI 3.14159265359
+
+      uniform vec3 gridNum;
+      uniform vec3 boxSize;
+      uniform float deltaTime;
+      uniform float noiseIntensity;
+      uniform float noiseSeed;
+      uniform float noiseScale;
+      uniform float sourceRadius;
+      uniform float sourceIntensity;
+      uniform float dissipationRate;
+      uniform float maxVelocity;
+      uniform float maxForce;
+      uniform float velocityDecay;
+      uniform float mouseRadius;
+      uniform vec3 myCameraPosition;
+      uniform vec3 cameraDirection;
+      uniform float cameraAspect;
+      uniform float cameraFov;
+      uniform bool isMouseMoved;
+      uniform vec2 prevMouse;
+      uniform vec2 currentMouse;
+
+      float random(in float v) {
+          return fract(sin(v * 125.342) * 43758.5453123);
+      }
+
+      bool isUsed(in vec2 coord) {
+        vec2 _coord = floor(coord);
+        float idx = _coord.x + _coord.y * resolution.x;
+        return idx < gridNum.x * gridNum.y * gridNum.z;
+      }
+
+      vec3 convertFromTexCoordToGrid(in vec2 coord) {
+        vec2 _coord = floor(coord);
+        float idx = _coord.x + _coord.y * resolution.x;
+        float x = mod(idx, gridNum.x);
+        float y = floor(mod(idx, gridNum.x * gridNum.y) / gridNum.x);
+        float z = floor(idx / (gridNum.x * gridNum.y));
+        return vec3(x, y, z);
+      }
+
+      vec3 convertFromGridToPos(in vec3 grid) {
+        vec3 gridWidth = boxSize / (gridNum - 1.0);
+        return grid * gridWidth - boxSize * 0.5;
+      }
+
+      vec3 convertFromPosToGrid(in vec3 pos) {
+        vec3 gridWidth = boxSize / (gridNum - 1.0);
+        pos += boxSize * 0.5;
+        return pos / gridWidth;
+      }
+
+      vec2 convertFromGridToTexCoord(in vec3 grid) {
+        float idx = grid.x + grid.y * gridNum.x + grid.z * (gridNum.x * gridNum.y);
+        float x = mod(idx, resolution.x);
+        float y = floor(idx / resolution.x);
+        return vec2(x, y) + vec2(0.5, 0.5);
+      }
+
+      bool isValidGrid(in vec3 grid) {
+        return grid.x >= 0.0 && grid.x < gridNum.x - 1.0 &&
+               grid.y >= 0.0 && grid.y < gridNum.y - 1.0 &&
+               grid.z >= 0.0 && grid.z < gridNum.z - 1.0;
+      }
+
+      float getDensity(in vec3 grid) {
+        vec3 f = floor(grid);
+        vec3 g = fract(grid);
+        float d000 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(0.0, 0.0, 0.0)) / resolution).w;
+        float d100 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(1.0, 0.0, 0.0)) / resolution).w;
+        float d010 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(0.0, 1.0, 0.0)) / resolution).w;
+        float d110 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(1.0, 1.0, 0.0)) / resolution).w;
+        float d001 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(0.0, 0.0, 1.0)) / resolution).w;
+        float d101 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(1.0, 0.0, 1.0)) / resolution).w;
+        float d011 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(0.0, 1.0, 1.0)) / resolution).w;
+        float d111 = texture2D(smokeTexture, convertFromGridToTexCoord(f + vec3(1.0, 1.0, 1.0)) / resolution).w;
+
+        return mix(
+          mix(mix(d000, d100, g.x), mix(d010, d110, g.x), g.y),
+          mix(mix(d001, d101, g.x), mix(d011, d111, g.x), g.y), g.z);
+      }
+
+      float calcCurrentDensity(in vec3 currentPos, in vec3 prevGrid) {
+        float density = 0.0;
+        if (!isValidGrid(prevGrid)) { // adds advection
+          return 0.0;
+        }
+        density = getDensity(prevGrid);
+
+        float d = length(currentPos);
+        float minBoxRadius = min(boxSize.x, min(boxSize.y, boxSize.z)) / 2.0;
+
+        density += (1.0 - step(sourceRadius * minBoxRadius, d)) * sourceIntensity * deltaTime; // adds source
+
+        density = clamp(density, 0.0, 1.0); // limits density
+        density *= (1.0 - dissipationRate * deltaTime); // dissiplates density
+
+        density *= 1.0 - (smoothstep(0.8, 1.0,  d / minBoxRadius) * deltaTime); // dissiplates near boundary
+
+        return density;
+      }
+
+      vec3 rayPointPerpendicularIntersection(vec3 ro, vec3 rd, vec3 p) {
+        vec3 op = p - ro;
+        float d = dot(op, rd);
+        return ro + d * rd;
+      }
+
+      void perspectiveCamera(in vec2 uv, in vec3 cameraPosition, in vec3 cameraDirection, in float fov, in float aspect, out vec3 rayOrigin, out vec3 rayDirection) {
+        vec2 st = uv * 2.0 - 1.0;
+        float radian = fov * PI / 180.0;
+        float h = tan(radian * 0.5);
+        float w = h * aspect;
+        vec3 right = normalize(cross(cameraDirection, vec3(0.0, 1.0, 0.0)));
+        vec3 up = normalize(cross(right, cameraDirection));
+        rayDirection = normalize(right * w * st.x + up * h * st.y + cameraDirection);
+        rayOrigin = cameraPosition;
+      }
+
+      vec3 calcVelocity(in vec3 pos) {
+        vec3 vel = texture2D(smokeTexture, gl_FragCoord.xy / resolution).xyz;
+        vel *= (1.0 - min(velocityDecay * deltaTime, 1.0));
+        if (!isMouseMoved) return vel;
+
+        vec3 prevOrigin, prevDir, currentOrigin, currentDir;
+        perspectiveCamera(prevMouse, myCameraPosition, cameraDirection, cameraFov, cameraAspect, prevOrigin, prevDir);
+        perspectiveCamera(currentMouse, myCameraPosition, cameraDirection, cameraFov, cameraAspect, currentOrigin, currentDir);
+
+        vec3 prevPoint = rayPointPerpendicularIntersection(prevOrigin, normalize(prevDir), pos);
+        vec3 currentPoint = rayPointPerpendicularIntersection(currentOrigin, normalize(currentDir), pos);
+        if (distance(prevPoint, currentPoint) > 0.0001) {
+          vec3 forceDir = normalize(currentPoint - prevPoint);
+          float dist = distance(pos, currentPoint);
+          vel += forceDir * maxForce * max(0.0, 1.0 - smoothstep(0.0, mouseRadius, distance(pos, currentPoint))) * deltaTime;
+        }
+
+        vec3 noiseOffset = 1000.0 * vec3(random(noiseSeed + 244.132), random(noiseSeed + 342.3524), random(noiseSeed + 592.345));
+        vel += noiseIntensity * cnoise(pos * noiseScale + noiseOffset) * deltaTime;
+
+        if (dot(vel, vel) > maxVelocity * maxVelocity) {
+          vel = normalize(vel) * maxVelocity;
+        }
+
+        return vel;
+      }
+
+      void main() {
+        if (!isUsed(gl_FragCoord.xy)) {
+          gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+          return;
+        }
+
+        vec3 grid = convertFromTexCoordToGrid(gl_FragCoord.xy);
+        vec3 pos = convertFromGridToPos(grid);
+
+        vec3 vel = calcVelocity(pos);
+        vec3 prevPos = pos - vel * deltaTime;
+        vec3 prevGrid = convertFromPosToGrid(prevPos);
+
+        float density = calcCurrentDensity(pos, prevGrid);
+
+        gl_FragColor = vec4(vel, density);
+      }
+    </script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+
+      void main() {
+        gl_Position = vec4(position, 1.0);
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+      precision highp float;
+
+      #define PI 3.14159265359
+
+      uniform sampler2D densityTexture;
+      uniform vec2 textureWidth;
+      uniform vec2 resolution;
+      uniform vec3 gridNum;
+      uniform vec3 boxSize;
+      uniform vec3 lightColor;
+      uniform float lightIntensity;
+      uniform bool smokeShade;
+      uniform vec3 floorColor;
+      uniform vec3 smokeColor1;
+      uniform vec3 smokeColor2;
+      uniform vec3 cameraPosition;
+      uniform vec3 cameraDirection;
+      uniform float cameraAspect;
+      uniform float cameraFov;
+
+      bool isValidGrid(in vec3 grid) {
+        return grid.x >= 0.0 && grid.x < gridNum.x - 1.0 &&
+               grid.y >= 0.0 && grid.y < gridNum.y - 1.0 &&
+               grid.z >= 0.0 && grid.z < gridNum.z - 1.0;
+      }
+
+      vec2 convertFromGridToUv(in vec3 grid) {
+        float idx = grid.x + grid.y * gridNum.x + grid.z * (gridNum.x * gridNum.y);
+        float x = mod(idx, textureWidth.x);
+        float y = floor(idx / textureWidth.x);
+        return (vec2(x, y) + vec2(0.5, 0.5)) / textureWidth;
+      }
+
+      float getDensity(in vec3 grid) {
+        vec3 f = floor(grid);
+        vec3 g = fract(grid);
+        float d000 = texture2D(densityTexture, convertFromGridToUv(f + vec3(0.0, 0.0, 0.0))).w;
+        float d100 = texture2D(densityTexture, convertFromGridToUv(f + vec3(1.0, 0.0, 0.0))).w;
+        float d010 = texture2D(densityTexture, convertFromGridToUv(f + vec3(0.0, 1.0, 0.0))).w;
+        float d110 = texture2D(densityTexture, convertFromGridToUv(f + vec3(1.0, 1.0, 0.0))).w;
+        float d001 = texture2D(densityTexture, convertFromGridToUv(f + vec3(0.0, 0.0, 1.0))).w;
+        float d101 = texture2D(densityTexture, convertFromGridToUv(f + vec3(1.0, 0.0, 1.0))).w;
+        float d011 = texture2D(densityTexture, convertFromGridToUv(f + vec3(0.0, 1.0, 1.0))).w;
+        float d111 = texture2D(densityTexture, convertFromGridToUv(f + vec3(1.0, 1.0, 1.0))).w;
+
+        return mix(
+          mix(mix(d000, d100, g.x), mix(d010, d110, g.x), g.y),
+          mix(mix(d001, d101, g.x), mix(d011, d111, g.x), g.y), g.z);
+      }
+
+      vec3 convertFromPosToGrid(in vec3 pos) {
+        vec3 gridWidth = boxSize / (gridNum - 1.0);
+        pos += boxSize * 0.5;
+        return pos / gridWidth;
+      }
+
+      vec4 map(vec3 pos) {
+        vec3 grid = convertFromPosToGrid(pos);
+        if (isValidGrid(grid)) {
+          float density = getDensity(grid);
+          vec3 color = mix(smokeColor1, smokeColor2, pow(density, 0.5));
+          return vec4(color, density);
+        } else {
+          return vec4(0.0);
+        }
+      }
+
+      bool intersectBox(in vec3 rayOrigin, in vec3 rayDirection, in vec3 boxSize, inout float tmin, inout float tmax) {
+        vec3 p0 = vec3(-boxSize * 0.5);
+        vec3 p1 = vec3(boxSize * 0.5);
+        vec3 dir = 1.0 / rayDirection;
+        for (int i = 0; i < 3; i++) {
+          float t0 = (p0[i] - rayOrigin[i]) * dir[i];
+          float t1 = (p1[i] - rayOrigin[i]) * dir[i];
+          float _tmin = min(t0, t1);
+          float _tmax = max(t0, t1);
+          tmin = max(tmin, _tmin);
+          tmax = min(tmax, _tmax);
+          if (tmin >= tmax) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      bool intersectPlane(in vec3 rayOrigin, in vec3 rayDirection, in float planeHeight, inout float t) {
+        if (abs(rayDirection.y) < 0.001) {
+          return false;
+        }
+        t = (planeHeight - rayOrigin.y) / rayDirection.y;
+        return true;
+      }
+
+      const vec3 lightPosition = vec3(0.0, 150.0, 0.0);
+      const vec3 lightDirection = normalize(-lightPosition);
+
+      vec3 light(in vec3 position) {
+        vec3 positionDirection = normalize(position - lightPosition);
+        float cosTheta = dot(lightDirection, positionDirection);
+        return lightIntensity * lightColor * pow(cosTheta, 4.0) * smoothstep(0.9, 0.95, cosTheta);
+      }
+
+      float densityForFloorShadow(in vec3 rayOrigin, in vec3 rayDirection) {
+        float tmin = 0.0;
+        float tmax = 1e20;
+        if (!intersectBox(rayOrigin, rayDirection, boxSize, tmin, tmax)) return 0.0;
+        float t = tmin;
+        float step = length(boxSize) / float(10);
+        float sum = 0.0;
+        for (int i = 0; i < 10; i++) {
+          vec3 p = rayOrigin + t * rayDirection;
+          float dens = map(p).w;
+          sum += (1.0 - sum) * dens;
+          t += step;
+          if (t > tmax || sum > 0.99) { break; }
+        }
+        return sum;
+      }
+
+      vec3 floor(in vec3 rayOrigin, in vec3 rayDirection) {
+        float t = -1.0;
+        vec3 normal = vec3(0.0, 1.0, 0.0);
+        if (dot(normal, rayDirection) < 0.0 && intersectPlane(rayOrigin, rayDirection, -50.0, t) && t > 0.0) {
+          vec3 pos = rayOrigin + t * rayDirection;
+          vec3 dirToLight = normalize(lightPosition - pos);
+          vec3 l = light(pos);
+          float shade = 0.5 + 0.5 * (1.0 - densityForFloorShadow(pos, dirToLight));
+          return floorColor * l * shade;
+        }
+        return vec3(0.0);
+      }
+
+      #define MAX_ITERATION 100
+      vec3 raymarch(in vec3 rayOrigin, in vec3 rayDirection) {
+
+        float tmin = 0.0;
+        float tmax = 1e20;
+        if (!intersectBox(rayOrigin, rayDirection, boxSize, tmin, tmax)) return floor(rayOrigin, rayDirection);
+        float t = tmin;
+        float step = length(boxSize) / float(MAX_ITERATION);
+        vec4 sum = vec4(0.0);
+        for (int i = 0; i <= MAX_ITERATION; i++) {
+          vec3 p = rayOrigin + t * rayDirection;
+          vec4 res = map(p);
+          vec3 c = res.rgb;
+          vec3 l = light(p);
+          c *= l;
+          if (smokeShade) {
+            vec3 dirToLight = normalize(lightPosition - p);
+            float occ = (map(p + dirToLight * step * 2.0).w + map(p + dirToLight * step * 4.0).w + map(p + dirToLight * step * 6.0).w) / 3.0;
+            c *= 0.7 + 0.3 * smoothstep(0.0, 0.5, 1.0 - occ);
+          }
+          float a = res.a;
+          float alpha = (1.0 - sum.a) * a;
+          sum += vec4(c * alpha, alpha);
+          t += step;
+          if (t > tmax || sum.a > 0.99) { break; }
+      	}
+
+        vec3 col = sum.rgb;
+        col = col + floor(rayOrigin, rayDirection) * (1.0 - sum.a);
+
+      	return col;
+
+      }
+
+      void perspectiveCamera(in vec2 uv, in vec3 cameraPosition, in vec3 cameraDirection, in float fov, in float aspect, out vec3 rayOrigin, out vec3 rayDirection) {
+        vec2 st = uv * 2.0 - 1.0;
+        float radian = fov * PI / 180.0;
+        float h = tan(radian * 0.5);
+        float w = h * aspect;
+        vec3 right = normalize(cross(cameraDirection, vec3(0.0, 1.0, 0.0)));
+        vec3 up = normalize(cross(right, cameraDirection));
+        rayDirection = normalize(right * w * st.x + up * h * st.y + cameraDirection);
+        rayOrigin = cameraPosition;
+      }
+
+      void main() {
+        vec3 rayOrigin, rayDirection;
+        perspectiveCamera(gl_FragCoord.xy / resolution, cameraPosition, cameraDirection, cameraFov, cameraAspect, rayOrigin, rayDirection);
+
+        vec3 color = raymarch(rayOrigin, rayDirection);
+      	gl_FragColor = vec4(color, 1.0);
+      }
+    </script>
+    <script>
+
+      let renderer, scene, camera, fakeCamera, controls, renderUniforms;
+      let gpuCompute, densityVariable, densityUniforms, materialUniforms;
+      let textureWidth, gridNum, boxSize;
+      let clock, guiParameters, stats, animationId;
+      let prevMouse, currentMouse, isMouseMoved;
+
+      initialize();
+      animate();
+
+      function initialize() {
+        guiParameters = {
+          dynamic: {
+            noiseIntensity: 0.5,
+            noiseSeed: 100.0,
+            noiseScale: 0.05,
+            sourceRadius: 0.25,
+            sourceIntensity: 0.3,
+            dissipationRate: 0.2,
+            lightColor: [255, 255, 255],
+            lightIntensity: 1.0,
+            smokeShade: false,
+            maxVelocity: 30.0,
+            maxForce: 30.0,
+            velocityDecay: 0.2,
+            mouseRadius: 10.0,
+            floorColor: [51, 51, 78],
+            smokeColor1: [255, 249, 234],
+            smokeColor2: [231, 247, 255],
+          },
+          static: {
+            gridNum: 50,
+            boxSize: 50
+          },
+          reset: () => {
+            cancelAnimationFrame(animationId);
+            reset();
+            animate();
+          }
+        }
+
+        const gui = new dat.GUI();
+        const guiDynamic = gui.addFolder('Dynamic Parameters');
+        guiDynamic.add(guiParameters.dynamic, 'maxVelocity', 5.0, 100.0);
+        guiDynamic.add(guiParameters.dynamic, 'maxForce', 5.0, 100.0);
+        guiDynamic.add(guiParameters.dynamic, 'velocityDecay', 0.0, 1.0);
+        guiDynamic.add(guiParameters.dynamic, 'mouseRadius', 0.0, 50.0);
+        guiDynamic.add(guiParameters.dynamic, 'noiseIntensity', 0, 2);
+        guiDynamic.add(guiParameters.dynamic, 'noiseSeed', 0, 10000);
+        guiDynamic.add(guiParameters.dynamic, 'noiseScale', 0.0, 0.2);
+        guiDynamic.add(guiParameters.dynamic, 'sourceRadius', 0.0, 0.5);
+        guiDynamic.add(guiParameters.dynamic, 'sourceIntensity', 0.0, 1.0);
+        guiDynamic.add(guiParameters.dynamic, 'dissipationRate', 0.0, 1.0);
+        guiDynamic.addColor(guiParameters.dynamic, 'lightColor');
+        guiDynamic.add(guiParameters.dynamic, 'lightIntensity', 0.5, 3.0);
+        guiDynamic.addColor(guiParameters.dynamic, 'floorColor');
+        guiDynamic.addColor(guiParameters.dynamic, 'smokeColor1');
+        guiDynamic.addColor(guiParameters.dynamic, 'smokeColor2');
+        guiDynamic.add(guiParameters.dynamic, 'smokeShade');
+        const guiStatic = gui.addFolder('Static Parameters');
+        guiStatic.add(guiParameters.static, 'gridNum', 10, 100).step(1);
+        guiStatic.add(guiParameters.static, 'boxSize', 10, 100);
+        gui.add(guiParameters, 'reset');
+
+        fakeCamera = new THREE.Camera();
+
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.set(75, 75, 75);
+        controls = new THREE.OrbitControls(camera);
+        scene = new THREE.Scene();
+        const gridNum =new THREE.Vector3(50, 50, 50);
+        const boxSize = new THREE.Vector3(30, 30, 30);
+
+        renderUniforms = {
+          smokeTexture: {value: null},
+          textureWidth: {value: null},
+          resolution: {value: new THREE.Vector2(window.innerWidth, window.innerHeight)},
+          gridNum : {value: null},
+          boxSize: {value: null},
+          lightColor: {value: new THREE.Vector3()},
+          lightIntensity: {value: 0.0},
+          smokeShade: {value: false},
+          floorColor: {value: new THREE.Vector3()},
+          smokeColor1: {value: new THREE.Vector3()},
+          smokeColor2: {value: new THREE.Vector3()},
+          cameraPosition: {value: new THREE.Vector3()},
+          cameraDirection: {value: new THREE.Vector3()},
+          cameraAspect: {value: camera.aspect},
+          cameraFov: {value: camera.fov},
+        };
+        const material = new THREE.RawShaderMaterial({
+          uniforms: renderUniforms,
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent
+        });
+
+        const plane = new THREE.Mesh(new THREE.PlaneBufferGeometry(2, 2), material);
+        scene.add(plane);
+
+        renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        window.addEventListener('resize', onResize, false);
+
+        prevMouse = new THREE.Vector2(0.0, 0.0);
+        currentMouse = new THREE.Vector2(0.0, 0.0);
+        isMouseMoved = false;
+        window.addEventListener('mousemove', onMouseMove, false);
+
+        reset();
+      }
+
+      function reset() {
+        const gridNumTemp = guiParameters.static.gridNum;
+        const boxSizeTemp = guiParameters.static.boxSize;
+        gridNum = new THREE.Vector3(gridNumTemp, gridNumTemp, gridNumTemp);
+        boxSize = new THREE.Vector3(boxSizeTemp, boxSizeTemp, boxSizeTemp);
+        setTextureWidth();
+        renderUniforms.textureWidth.value = new THREE.Vector2(textureWidth, textureWidth);
+        renderUniforms.gridNum.value = gridNum;
+        renderUniforms.boxSize.value = boxSize;
+        initializeGpuCompute();
+        clock = new THREE.Clock();
+      }
+
+      function setTextureWidth() {
+        for (let i = 1, l = gridNum.x * gridNum.y * gridNum.z; ; i++) {
+          const w = Math.pow(2, i);
+          if (w * w > l) {
+            textureWidth = w;
+            break;
+          }
+        }
+      }
+
+      function initializeGpuCompute() {
+        gpuCompute = new GPUComputationRenderer(textureWidth, textureWidth, renderer);
+        const smokeTexture = gpuCompute.createTexture();
+        const smokeArray = smokeTexture.image.data;
+        for (var i = 0, l = smokeArray.length; i < l; i += 4) {
+          smokeArray[i + 0] = 0.0; // velocity x
+          smokeArray[i + 1] = 0.0; // velocity y
+          smokeArray[i + 2] = 0.0; // velocity z
+          smokeArray[i + 3] = 0.0; // density
+        }
+
+        smokeVariable = gpuCompute.addVariable('smokeTexture', document.getElementById('smokeShader').textContent, smokeTexture);
+        smokeUniforms = smokeVariable.material.uniforms;
+        Object.assign(smokeUniforms, {
+          gridNum: {value: gridNum},
+          boxSize: {value: boxSize},
+          deltaTime: {value: 0.0},
+          noiseIntensity: {value: 0.0},
+          noiseSeed: {value: 0.0},
+          noiseScale: {value: 0.0},
+          sourceRadius: {value: 0.0},
+          sourceIntensity: {value: 0.0},
+          dissipationRate: {value: 0.0},
+          maxVelocity: {value: 0.0},
+          maxForce: {value: 0.0},
+          velocityDecay: {value: 0.0},
+          mouseRadius: {value: 0.0},
+          myCameraPosition: {value: new THREE.Vector3()},
+          cameraDirection: {value: new THREE.Vector3()},
+          cameraAspect: {value: camera.aspect},
+          cameraFov: {value: camera.fov},
+          isMouseMoved: {value: false},
+          prevMouse: {value: prevMouse},
+          currentMouse: {value: currentMouse},
+        });
+
+        gpuCompute.setVariableDependencies(smokeVariable, [smokeVariable]);
+
+        const error = gpuCompute.init();
+        if (error !== null) {
+          console.error(error);
+        }
+      }
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        smokeUniforms.cameraAspect.value = camera.aspect;
+        renderUniforms.cameraAspect.value = camera.aspect;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderUniforms.resolution.value.x = window.innerWidth;
+        renderUniforms.resolution.value.y = window.innerHeight;
+      }
+
+      function onMouseMove(event) {
+        if (!isMouseMoved) {
+          prevMouse.copy(currentMouse);
+        }
+        isMouseMoved = true;
+        currentMouse.x = event.clientX / window.innerWidth;
+        currentMouse.y = 1.0 - (event.clientY / window.innerHeight);
+      }
+
+      function animate() {
+        animationId = requestAnimationFrame(animate);
+        stats.update();
+        controls.update();
+
+        const deltaTime = Math.min(clock.getDelta(), 0.2);
+        smokeUniforms.deltaTime.value = deltaTime;
+        smokeUniforms.noiseIntensity.value = guiParameters.dynamic.noiseIntensity;
+        smokeUniforms.noiseSeed.value = guiParameters.dynamic.noiseSeed;
+        smokeUniforms.noiseScale.value = guiParameters.dynamic.noiseScale;
+        smokeUniforms.sourceRadius.value = guiParameters.dynamic.sourceRadius;
+        smokeUniforms.sourceIntensity.value = guiParameters.dynamic.sourceIntensity;
+        smokeUniforms.dissipationRate.value = guiParameters.dynamic.dissipationRate;
+        smokeUniforms.maxVelocity.value = guiParameters.dynamic.maxVelocity;
+        smokeUniforms.maxForce.value = guiParameters.dynamic.maxForce;
+        smokeUniforms.velocityDecay.value = guiParameters.dynamic.velocityDecay;
+        smokeUniforms.mouseRadius.value = guiParameters.dynamic.mouseRadius;
+        smokeUniforms.isMouseMoved.value = isMouseMoved;
+        camera.getWorldPosition(smokeUniforms.myCameraPosition.value);
+        camera.getWorldDirection(smokeUniforms.cameraDirection.value);
+        gpuCompute.compute();
+        renderUniforms.smokeTexture.value = gpuCompute.getCurrentRenderTarget(smokeVariable).texture;
+        renderUniforms.lightColor.value.set(guiParameters.dynamic.lightColor[0] / 255.0, guiParameters.dynamic.lightColor[1] / 255.0, guiParameters.dynamic.lightColor[2] / 255.0);
+        renderUniforms.lightIntensity.value = guiParameters.dynamic.lightIntensity;
+        renderUniforms.floorColor.value.set(guiParameters.dynamic.floorColor[0] / 255.0, guiParameters.dynamic.floorColor[1] / 255.0, guiParameters.dynamic.floorColor[2] / 255.0);
+        renderUniforms.smokeColor1.value.set(guiParameters.dynamic.smokeColor1[0] / 255.0, guiParameters.dynamic.smokeColor1[1] / 255.0, guiParameters.dynamic.smokeColor1[2] / 255.0);
+        renderUniforms.smokeColor2.value.set(guiParameters.dynamic.smokeColor2[0] / 255.0, guiParameters.dynamic.smokeColor2[1] / 255.0, guiParameters.dynamic.smokeColor2[2] / 255.0);
+        renderUniforms.smokeShade.value = guiParameters.dynamic.smokeShade;
+        camera.getWorldPosition(renderUniforms.cameraPosition.value);
+        camera.getWorldDirection(renderUniforms.cameraDirection.value);
+        renderer.render(scene, fakeCamera);
+
+        isMouseMoved = false;
+      }
+    </script>
+  </body>
+</html>

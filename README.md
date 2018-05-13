@@ -47,3 +47,9 @@ https://aadebdeb.github.io/study-three.js/interaction-with-gpgpu-particles-and-m
 https://aadebdeb.github.io/study-three.js/raymarching-with-threejs-camera.html
 
 ![animation gif for "Raymarching with three.js Camera"](https://aadebdeb.github.io/study-three.js/screenshots/raymarching-with-threejs-camera.png)
+
+## #9 Interaction with Smoke and Mouse
+
+https://aadebdeb.github.io/study-three.js/interaction-with-smoke-and-mouse.html
+
+![animation gif for "Interaction with Smoke and Mouse"](https://aadebdeb.github.io/study-three.js/screenshots/interaction-with-smoke-and-mouse.png)
