@@ -53,3 +53,7 @@ https://aadebdeb.github.io/study-three.js/raymarching-with-threejs-camera.html
 https://aadebdeb.github.io/study-three.js/interaction-with-smoke-and-mouse.html
 
 ![animation gif for "Interaction with Smoke and Mouse"](https://aadebdeb.github.io/study-three.js/screenshots/interaction-with-smoke-and-mouse.png)
+
+## #10 Fluid Webcam with Mouse Interaction
+
+https://aadebdeb.github.io/study-three.js/fluid-webcam-with-mouse-interaction.html

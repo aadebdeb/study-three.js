@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lnag="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Fluid Webcam With Mouse Interaction</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="./js/three.js"></script>
+    <script src="./js/GPUComputationRenderer.js"></script>
+    <script src="./js/stats.js"></script>
+    <script src="./js/dat.gui.js"></script>
+    <script id="densityShader" type="x-shader/x-fragment">
+
+      uniform sampler2D videoTexture;
+      uniform float deltaTime;
+      uniform float sourceIntensity;
+      uniform float densityDecay;
+      uniform float cameraContrast;
+
+      vec4 getDensity(vec2 uv) {
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+          return vec4(0.0);
+        }
+        vec2 coord = uv * resolution;
+        vec2 f = floor(coord);
+        vec2 g = fract(coord);
+        f.x += g.x < 0.5 ? -0.5 : 0.5;
+        f.y += g.y < 0.5 ? -0.5 : 0.5;
+        g.x += g.x < 0.5 ? 0.5 : -0.5;
+        g.y += g.y < 0.5 ? 0.5 : -0.5;
+
+        vec2 resFract = 1.0 / resolution;
+        vec4 v1 = texture2D(densityTexture, (f + vec2(0.0, 0.0)) * resFract);
+        vec4 v2 = texture2D(densityTexture, (f + vec2(1.0, 0.0)) * resFract);
+        vec4 v3 = texture2D(densityTexture, (f + vec2(0.0, 1.0)) * resFract);
+        vec4 v4 = texture2D(densityTexture, (f + vec2(1.0, 1.0)) * resFract);
+
+        return mix(mix(v1, v2, g.x), mix(v3, v4, g.x), g.y);
+      }
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution;
+        vec3 texel = clamp((texture2D(videoTexture, uv).xyz - 0.5) * cameraContrast + 0.5, 0.0, 1.0);
+        // vec3 texel = texture2D(videoTexture, uv).xyz;
+
+        vec2 velocity = texture2D(velocityTexture, uv).xy;
+        vec2 prevUv = uv - velocity * deltaTime;
+        vec4 prevDensityTemp = getDensity(prevUv);
+        vec3 prevColor = prevDensityTemp.rgb;
+        float prevDensity = prevDensityTemp.w;
+
+        float source = sourceIntensity * deltaTime;
+
+        prevDensity *= (1.0 - min(1.0, deltaTime * densityDecay)); // decay;
+
+        float density = source + prevDensity;
+        if (density > 0.00001) {
+          float fractDensity = 1.0 / density;
+          vec3 color = texel * source * fractDensity + prevColor * prevDensity * fractDensity;
+          density = clamp(density, 0.0, 1.0);
+          gl_FragColor = vec4(color, density);
+        } else {
+          gl_FragColor = vec4(vec3(0.0), density);
+        }
+      }
+    </script>
+    <script id="velocityShader" type="x-shader/x-fragment">
+
+      uniform float deltaTime;
+      uniform bool isMouseMoved;
+      uniform vec2 prevMouse;
+      uniform vec2 currentMouse;
+      uniform float velocityDecay;
+      uniform float maxVelocity;
+      uniform float maxForce;
+      uniform float mouseRadius;
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution;
+
+        vec2 velocity = texture2D(velocityTexture, uv).xy;
+
+        velocity *= (1.0 - velocityDecay * deltaTime);
+
+        float mouseDist = distance(prevMouse, currentMouse);
+        if (isMouseMoved && mouseDist > 0.0001 * deltaTime) {
+          float d = distance(uv, currentMouse);
+          vec2 dir = normalize(currentMouse - prevMouse);
+          float mouseSpeed = mouseDist / deltaTime;
+          velocity += maxForce * dir * max(0.0, 1.0 - d / mouseRadius) * mouseSpeed * deltaTime;
+        }
+
+        if (length(velocity) > maxVelocity) {
+          velocity = normalize(velocity) * maxVelocity;
+        }
+
+        gl_FragColor = vec4(velocity, 0.0, 1.0);
+      }
+    </script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+
+      void main() {
+        gl_Position = vec4(position, 1.0);
+      }
+    </script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+      precision highp float;
+
+      uniform vec2 resolution;
+      uniform sampler2D densityTexture;
+
+      void main() {
+        vec2 uv = gl_FragCoord.xy / resolution;
+        vec4 densityTemp = texture2D(densityTexture, uv);
+        vec3 color = densityTemp.rgb;
+        float density = densityTemp.w;
+        gl_FragColor = vec4(color * density, 1.0);
+      }
+    </script>
+    <script>
+
+      const guiParameters = {
+        sourceIntensity: 0.5,
+        densityDecay: 0.1,
+        velocityDecay: 1.0,
+        maxVelocity: 10,
+        maxForce: 5,
+        mouseRadius: 0.1,
+        cameraContrast: 1.0,
+      };
+
+      const gui = new dat.GUI();
+      gui.add(guiParameters, 'sourceIntensity', 0, 5);
+      gui.add(guiParameters, 'densityDecay', 0, 2);
+      gui.add(guiParameters, 'velocityDecay', 0, 5);
+      gui.add(guiParameters, 'maxVelocity', 0, 20);
+      gui.add(guiParameters, 'maxForce', 0, 20);
+      gui.add(guiParameters, 'mouseRadius', 0, 1);
+      gui.add(guiParameters, 'cameraContrast', 1, 10);
+
+
+      const renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const video = document.createElement('video');
+      const videoTexture = new THREE.VideoTexture(video);
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+
+      const prevMouse = new THREE.Vector2(0.0, 0.0);
+      const currentMouse = new THREE.Vector2(0.0, 0.0);
+      let isMouseMoved = false;
+      window.addEventListener('mousemove', onMouseMove, false);
+
+      function onMouseMove(event) {
+        if (!isMouseMoved) {
+          prevMouse.copy(currentMouse);
+        }
+        isMouseMoved = true;
+        currentMouse.x = event.clientX / window.innerWidth;
+        currentMouse.y = 1.0 - (event.clientY / window.innerHeight);
+      }
+
+      const gpuCompute = new GPUComputationRenderer(window.innerWidth, window.innerHeight, renderer);
+      const densityTexture = gpuCompute.createTexture();
+      const velocityTexture = gpuCompute.createTexture();
+      const densityArray = densityTexture.image.data;
+      const velocityArray = velocityTexture.image.data;
+      for (var i = 0, l = densityArray.length; i < l; i += 4) {
+        densityArray[i + 0] = 0.0; // color r
+        densityArray[i + 1] = 0.0; // color g
+        densityArray[i + 2] = 0.0; // color b
+        densityArray[i + 3] = 0.0; // density
+        velocityArray[i + 0] = 0.0;
+        velocityArray[i + 1] = 0.0;
+        velocityArray[i + 2] = 0.0;
+        velocityArray[i + 3] = 0.0;
+      }
+      const densityVariable = gpuCompute.addVariable('densityTexture', document.getElementById('densityShader').textContent, densityTexture);
+      const velocityVariable = gpuCompute.addVariable('velocityTexture', document.getElementById('velocityShader').textContent, velocityTexture);
+      const densityUniforms = densityVariable.material.uniforms;
+      const velocityUniforms = velocityVariable.material.uniforms;
+
+      Object.assign(densityUniforms, {
+        videoTexture: {value: videoTexture},
+        deltaTime: {value: 0.0},
+        sourceIntensity: {value: 0.0},
+        densityDecay: {value: 0.0},
+        cameraContrast: {value: 0.0},
+      });
+
+      Object.assign(velocityUniforms, {
+        deltaTime: {value: 0.0},
+        isMouseMoved: {value: false},
+        prevMouse: {value: prevMouse},
+        currentMouse: {value: currentMouse},
+        velocityDecay: {value: 0.0},
+        maxVelocity: {value: 0.0},
+        maxForce: {value: 0.0},
+        mouseRadius: {value: 0.0},
+      });
+
+      gpuCompute.setVariableDependencies(densityVariable, [densityVariable, velocityVariable]);
+      gpuCompute.setVariableDependencies(velocityVariable, [densityVariable, velocityVariable]);
+
+      const error = gpuCompute.init();
+      if (error !== null) {
+        console.error(error);
+      }
+
+      const camera = new THREE.Camera();
+
+      const scene = new THREE.Scene();
+
+      const renderUniforms = {
+        resolution: {value: new THREE.Vector2(window.innerWidth, window.innerHeight)},
+        densityTexture: {value: null},
+      };
+      const plane = new THREE.Mesh(
+        new THREE.PlaneBufferGeometry(2, 2),
+        new THREE.RawShaderMaterial({
+          uniforms: renderUniforms,
+          vertexShader: document.getElementById('vertexShader').textContent,
+          fragmentShader: document.getElementById('fragmentShader').textContent,
+        })
+      );
+
+      scene.add(plane);
+
+
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const constraints = {
+          video: {width: 1280, height: 720, facingMode: 'user'}
+        };
+        navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+          if (video.srcObject) {
+            video.srcObject = stream;
+          } else {
+            video.src = window.URL.createObjectURL(stream);
+          }
+          video.play();
+        }).catch((error) => {
+          console.error('can not access webcam.', error);
+        });
+      } else {
+        console.error('webcam is not supported.');
+      }
+
+      const clock = new THREE.Clock();
+
+      const stats = new Stats();
+      document.body.appendChild(stats.dom);
+
+      animate();
+      function animate() {
+        requestAnimationFrame(animate);
+        stats.update();
+        const deltaTime = Math.min(clock.getDelta(), 0.2);
+        densityUniforms.deltaTime.value = deltaTime;
+        densityUniforms.sourceIntensity.value = guiParameters.sourceIntensity;
+        densityUniforms.densityDecay.value = guiParameters.densityDecay;
+        densityUniforms.cameraContrast.value = guiParameters.cameraContrast;
+        velocityUniforms.deltaTime.value = deltaTime;
+        velocityUniforms.isMouseMoved.value = isMouseMoved;
+        velocityUniforms.velocityDecay.value = guiParameters.velocityDecay;
+        velocityUniforms.maxVelocity.value = guiParameters.maxVelocity;
+        velocityUniforms.maxForce.value = guiParameters.maxForce;
+        velocityUniforms.mouseRadius.value = guiParameters.mouseRadius;
+        gpuCompute.compute();
+        renderUniforms.densityTexture.value = gpuCompute.getCurrentRenderTarget(densityVariable).texture;
+
+        renderer.render(scene, camera);
+
+        isMouseMoved = false;
+      }
+
+    </script>
+  </body>
+</html>
